@@ -1,0 +1,94 @@
+---------------------------------------------------------------------------------------------------
+-- 04_control_claims.sql
+-- Pre/Post claims for the CONTROL group (non-GLP-1 members with obesity/diabetes dx).
+-- Uses a pseudo-index date (midpoint of GLP-1 cohort's index window).
+-- Same structure as 03 but for controls — enables DID comparison.
+---------------------------------------------------------------------------------------------------
+
+WITH GLP1_GUIDS AS (
+    SELECT DISTINCT EM.CURRENTGUID
+    FROM SC_REPORTING.DHS_RXCLAIMS RX
+    JOIN MASTER_DATA.TherapeuticConcept_NDC_XREF GLP
+        ON REPLACE(RX.NdcCode, '-', '') = GLP.NDC11
+    JOIN ENT_WH.ELIGMEMBER EM ON RX.Guid = EM.GUID AND EM.CUSTOMERID = '{CUSTOMERID}'
+    WHERE (GLP.TherapeuticConceptName ILIKE '%GLP-1%'
+        OR GLP.TherapeuticConceptName ILIKE '%GIP and GLP%')
+      AND GLP.Deleted IS NOT TRUE AND RX.CustomerId = '{CUSTOMERID}' AND RX.Guid > 0
+),
+CONTROLS AS (
+    SELECT DISTINCT
+        EM.CURRENTGUID,
+        EM.GUID,
+        '{PSEUDO_INDEX}'::DATE AS INDEX_DATE
+    FROM SC_REPORTING.DHS_MEDCLAIMS MC
+    JOIN ENT_WH.ELIGMEMBER EM ON MC.Guid = EM.GUID AND EM.CUSTOMERID = '{CUSTOMERID}'
+        AND EM.BIEFFECTIVEDATE <= SYSDATE::DATE
+        AND EM.BIENDDATE >= TIMESTAMPADD(MONTH, -36, SYSDATE::DATE)
+    LEFT JOIN GLP1_GUIDS G ON EM.CURRENTGUID = G.CURRENTGUID
+    WHERE MC.CustomerId = '{CUSTOMERID}' AND MC.Guid > 0 AND MC.RecordStatus = 'C'
+      AND MC.DateServiceFrom BETWEEN '{INDEX_START}' AND '{INDEX_END}'
+      AND G.CURRENTGUID IS NULL
+      AND (MC.ICDxCode1 LIKE 'E11%' OR MC.ICDxCode2 LIKE 'E11%' OR MC.ICDxCode3 LIKE 'E11%'
+        OR MC.ICDxCode1 LIKE 'E66%' OR MC.ICDxCode2 LIKE 'E66%' OR MC.ICDxCode3 LIKE 'E66%')
+),
+MED_PRE AS (
+    SELECT G.CURRENTGUID,
+        SUM(CASE WHEN REGEXP_LIKE(MC.PaidAmt, '^\-?\d+\.?\d*$') THEN MC.PaidAmt::FLOAT ELSE 0 END) AS MED_PAID,
+        COUNT(DISTINCT CASE WHEN TRIM(MC.PlaceOfService) = '21' THEN MC.ClaimId END) AS IP_ADMITS,
+        COUNT(DISTINCT CASE WHEN TRIM(MC.PlaceOfService) = '23' THEN MC.ClaimId END) AS ER_VISITS
+    FROM CONTROLS G
+    JOIN SC_REPORTING.DHS_MEDCLAIMS MC ON G.GUID = MC.Guid
+    WHERE MC.CustomerId = '{CUSTOMERID}' AND MC.Guid > 0 AND MC.RecordStatus = 'C'
+      AND MC.DateServiceFrom::DATE >= TIMESTAMPADD(MONTH, -12, G.INDEX_DATE)
+      AND MC.DateServiceFrom::DATE < G.INDEX_DATE
+    GROUP BY 1
+),
+MED_POST AS (
+    SELECT G.CURRENTGUID,
+        SUM(CASE WHEN REGEXP_LIKE(MC.PaidAmt, '^\-?\d+\.?\d*$') THEN MC.PaidAmt::FLOAT ELSE 0 END) AS MED_PAID,
+        COUNT(DISTINCT CASE WHEN TRIM(MC.PlaceOfService) = '21' THEN MC.ClaimId END) AS IP_ADMITS,
+        COUNT(DISTINCT CASE WHEN TRIM(MC.PlaceOfService) = '23' THEN MC.ClaimId END) AS ER_VISITS
+    FROM CONTROLS G
+    JOIN SC_REPORTING.DHS_MEDCLAIMS MC ON G.GUID = MC.Guid
+    WHERE MC.CustomerId = '{CUSTOMERID}' AND MC.Guid > 0 AND MC.RecordStatus = 'C'
+      AND MC.DateServiceFrom::DATE >= G.INDEX_DATE
+      AND MC.DateServiceFrom::DATE < TIMESTAMPADD(MONTH, 12, G.INDEX_DATE)
+    GROUP BY 1
+),
+RX_PRE AS (
+    SELECT G.CURRENTGUID,
+        SUM(CASE WHEN REGEXP_LIKE(RX.PaidAmt, '^\-?\d+\.?\d*$') THEN RX.PaidAmt::FLOAT ELSE 0 END) AS RX_PAID
+    FROM CONTROLS G
+    JOIN SC_REPORTING.DHS_RXCLAIMS RX ON G.GUID = RX.Guid
+    WHERE RX.CustomerId = '{CUSTOMERID}' AND RX.Guid > 0 AND RX.RecordStatus = 'C'
+      AND RX.DateFilled::DATE >= TIMESTAMPADD(MONTH, -12, G.INDEX_DATE)
+      AND RX.DateFilled::DATE < G.INDEX_DATE
+    GROUP BY 1
+),
+RX_POST AS (
+    SELECT G.CURRENTGUID,
+        SUM(CASE WHEN REGEXP_LIKE(RX.PaidAmt, '^\-?\d+\.?\d*$') THEN RX.PaidAmt::FLOAT ELSE 0 END) AS RX_PAID
+    FROM CONTROLS G
+    JOIN SC_REPORTING.DHS_RXCLAIMS RX ON G.GUID = RX.Guid
+    WHERE RX.CustomerId = '{CUSTOMERID}' AND RX.Guid > 0 AND RX.RecordStatus = 'C'
+      AND RX.DateFilled::DATE >= G.INDEX_DATE
+      AND RX.DateFilled::DATE < TIMESTAMPADD(MONTH, 12, G.INDEX_DATE)
+    GROUP BY 1
+)
+SELECT
+    G.CURRENTGUID,
+    G.INDEX_DATE,
+    NVL(MP.MED_PAID, 0)   AS PRE_MED_PAID,
+    NVL(MPO.MED_PAID, 0)  AS POST_MED_PAID,
+    NVL(MP.IP_ADMITS, 0)   AS PRE_IP_ADMITS,
+    NVL(MPO.IP_ADMITS, 0)  AS POST_IP_ADMITS,
+    NVL(MP.ER_VISITS, 0)   AS PRE_ER_VISITS,
+    NVL(MPO.ER_VISITS, 0)  AS POST_ER_VISITS,
+    NVL(RP.RX_PAID, 0)    AS PRE_RX_PAID,
+    NVL(RPO.RX_PAID, 0)   AS POST_RX_PAID,
+    'Control' AS COHORT_TYPE
+FROM CONTROLS G
+LEFT JOIN MED_PRE MP   ON G.CURRENTGUID = MP.CURRENTGUID
+LEFT JOIN MED_POST MPO ON G.CURRENTGUID = MPO.CURRENTGUID
+LEFT JOIN RX_PRE RP    ON G.CURRENTGUID = RP.CURRENTGUID
+LEFT JOIN RX_POST RPO  ON G.CURRENTGUID = RPO.CURRENTGUID
