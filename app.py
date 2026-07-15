@@ -44,9 +44,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="GLP-1 Value & Outcomes Dashboard",
-    page_icon="📊",
+    page_icon="",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
@@ -216,6 +216,12 @@ def load_or_query(csv_name: str, sql_file: str, params: dict, force_refresh: boo
                 except (TypeError, ValueError):
                     pass
         return df
+    elif not HAS_DB:
+        # No database and no cached CSV — return empty DataFrame
+        if csv_path.exists():
+            return pd.read_csv(csv_path)
+        logger.warning(f"No cached data for {csv_name} and no DB available")
+        return pd.DataFrame()
     else:
         logger.info(f"Querying Vertica for: {csv_name}")
         df = run_sql(sql_file, params)
@@ -337,13 +343,10 @@ with st.sidebar:
     st.caption("Value & Savings Analysis")
     st.markdown("---")
 
-    customer_id = st.text_input("Customer ID", value="ER_USI")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        index_start = st.date_input("Index Start", value=pd.to_datetime("2022-01-01"))
-    with col2:
-        index_end = st.date_input("Index End", value=pd.to_datetime("2025-07-01"))
+    # Fixed parameters for deployed version
+    customer_id = "ER_USI"
+    index_start = pd.to_datetime("2022-01-01")
+    index_end = pd.to_datetime("2025-07-01")
 
     index_start_str = index_start.strftime("%Y-%m-%d")
     index_end_str = index_end.strftime("%Y-%m-%d")
@@ -351,45 +354,17 @@ with st.sidebar:
     # Pseudo-index for controls: midpoint of the GLP-1 index window
     pseudo_index = (index_start + (index_end - index_start) / 2).strftime("%Y-%m-%d")
 
-    st.markdown("---")
-    st.markdown("**Cohort Filters**")
+    # No filters — show full cohort
+    indication_filter = "All GLP-1 Members"
+    persistence_filter = "All"
+    engagement_filter = "All"
 
-    indication_filter = st.radio(
-        "Drug Indication",
-        ["All GLP-1 Members", "Diabetes", "Weight Management"],
-        index=0,
-        help="Diabetes: Ozempic, Mounjaro, Trulicity, Victoza, Rybelsus. "
-             "Weight Management: Wegovy, Zepbound.",
-    )
-
-    persistence_filter = st.radio(
-        "Persistence Segment",
-        ["All", "Persisters Only", "Discontinuers Only"],
-        index=0,
-    )
-
-    engagement_filter = st.radio(
-        "Platform Engagement",
-        ["All", "High Engagement", "Moderate Engagement", "Low/No Engagement"],
-        index=0,
-        help="High = 6+ MAU months + DTx program. Moderate = 3+ MAU months or 5+ events. Low = minimal/no activity.",
-    )
-
-    st.markdown("---")
-    refresh_data = st.button("🔄 Refresh Data from Vertica",
-                             help="Re-queries the database and updates cached CSV files")
-    if refresh_data:
-        # Clear any cached CSVs
-        for f in DATA_DIR.glob("*.csv"):
-            f.unlink()
-        st.rerun()
-
-    # Show cache status
-    cached_files = list(DATA_DIR.glob("*.csv"))
-    if cached_files:
-        st.caption(f"📁 Using cached data ({len(cached_files)} files)")
-    else:
-        st.caption("⏳ Will query Vertica on first load")
+    st.markdown("""
+    **Population**
+    - USI — All GLP-1 Members
+    - Index period: Jan 2022 – Jul 2025
+    - 12-month pre/post observation
+    """)
 
     st.markdown("---")
     st.markdown("""
