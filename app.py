@@ -1413,7 +1413,7 @@ with tab0:
             </table>
             </div>
             """
-            st.markdown(table_html, unsafe_allow_html=True)
+            st.html(table_html)
 
             st.markdown(f"""
             <div class="method-box">
@@ -3941,7 +3941,7 @@ with tab7:
         </table>
         </div>
         """
-        st.markdown(m1_html, unsafe_allow_html=True)
+        st.html(m1_html)
 
         st.markdown(f"""
         <div class="method-box">
@@ -4204,7 +4204,7 @@ with tab7:
         </table>
         </div>
         """
-        st.markdown(m2_html, unsafe_allow_html=True)
+        st.html(m2_html)
 
         st.markdown(f"""
         <div class="method-box">
