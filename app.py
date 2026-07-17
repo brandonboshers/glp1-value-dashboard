@@ -339,59 +339,14 @@ with st.sidebar:
     st.caption("Value & Savings Analysis")
     st.markdown("---")
 
-    customer_id = st.text_input("Customer ID", value="ER_USI")
+    # Hardcoded parameters (data refreshed via CLI when needed)
+    customer_id = "ER_USI"
+    index_start_str = "2022-01-01"
+    index_end_str = "2025-07-01"
+    pseudo_index = "2023-10-01"
 
-    col1, col2 = st.columns(2)
-    with col1:
-        index_start = st.date_input("Index Start", value=pd.to_datetime("2022-01-01"))
-    with col2:
-        index_end = st.date_input("Index End", value=pd.to_datetime("2025-07-01"))
-
-    index_start_str = index_start.strftime("%Y-%m-%d")
-    index_end_str = index_end.strftime("%Y-%m-%d")
-
-    # Pseudo-index for controls: midpoint of the GLP-1 index window
-    pseudo_index = (index_start + (index_end - index_start) / 2).strftime("%Y-%m-%d")
-
-    st.markdown("---")
-    st.markdown("**Cohort Filters**")
-
-    indication_filter = st.radio(
-        "Drug Indication",
-        ["All GLP-1 Members", "Diabetes", "Weight Management"],
-        index=0,
-        help="Diabetes: Ozempic, Mounjaro, Trulicity, Victoza, Rybelsus. "
-             "Weight Management: Wegovy, Zepbound.",
-    )
-
-    persistence_filter = st.radio(
-        "Persistence Segment",
-        ["All", "Persisters Only", "Discontinuers Only"],
-        index=0,
-    )
-
-    engagement_filter = st.radio(
-        "Platform Engagement",
-        ["All", "High Engagement", "Moderate Engagement", "Low/No Engagement"],
-        index=0,
-        help="High = 6+ MAU months + DTx program. Moderate = 3+ MAU months or 5+ events. Low = minimal/no activity.",
-    )
-
-    st.markdown("---")
-    refresh_data = st.button("🔄 Refresh Data from Vertica",
-                             help="Re-queries the database and updates cached CSV files")
-    if refresh_data:
-        # Clear any cached CSVs
-        for f in DATA_DIR.glob("*.csv"):
-            f.unlink()
-        st.rerun()
-
-    # Show cache status
-    cached_files = list(DATA_DIR.glob("*.csv"))
-    if cached_files:
-        st.caption(f"📁 Using cached data ({len(cached_files)} files)")
-    else:
-        st.caption("⏳ Will query Vertica on first load")
+    st.markdown(f"**Customer:** {customer_id}")
+    st.markdown(f"**Index Window:** {index_start_str} to {index_end_str}")
 
     st.markdown("---")
     st.markdown("""
@@ -460,25 +415,7 @@ df_bio = df_bio.merge(
     on="CURRENTGUID", how="left"
 )
 
-# Apply indication filter
-if indication_filter == "Diabetes":
-    df_merged = df_merged[df_merged["PRIMARY_INDICATION"] == "Diabetes"]
-    df_bio = df_bio[df_bio["PRIMARY_INDICATION"] == "Diabetes"]
-elif indication_filter == "Weight Management":
-    df_merged = df_merged[df_merged["PRIMARY_INDICATION"] == "Weight Management"]
-    df_bio = df_bio[df_bio["PRIMARY_INDICATION"] == "Weight Management"]
-
-# Apply persistence filter
-if persistence_filter == "Persisters Only":
-    df_merged = df_merged[df_merged["PERSISTENCE_COHORT"] == "Persister"]
-    df_bio = df_bio[df_bio["PERSISTENCE_COHORT"] == "Persister"]
-elif persistence_filter == "Discontinuers Only":
-    df_merged = df_merged[df_merged["PERSISTENCE_COHORT"] == "Discontinuer"]
-    df_bio = df_bio[df_bio["PERSISTENCE_COHORT"] == "Discontinuer"]
-
-# Apply engagement filter
-if engagement_filter != "All" and "ENGAGEMENT_TIER" in df_merged.columns:
-    df_merged = df_merged[df_merged["ENGAGEMENT_TIER"] == engagement_filter]
+# No filters applied — show all members
 
 if df_merged.empty:
     st.warning("No members match the selected filters.")
