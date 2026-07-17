@@ -30,7 +30,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SQL_DIR = SCRIPT_DIR / "sql"
 
 sys.path.append(os.path.expanduser("~/Documents/dev/automation"))
-from db_connect import get_connection  # noqa: E402
+try:
+    from db_connect import get_connection  # noqa: E402
+except ImportError:
+    get_connection = None  # Running on Streamlit Cloud — CSV-only mode
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
 logger = logging.getLogger(__name__)
@@ -163,6 +166,11 @@ DATA_DIR.mkdir(exist_ok=True)
 
 def run_sql(filename: str, params: dict) -> pd.DataFrame:
     """Load and execute a parameterized SQL file."""
+    if get_connection is None:
+        raise RuntimeError(
+            "Database connection not available (running in CSV-only mode). "
+            "Use the cached CSV files or run locally with db_connect.py."
+        )
     sql = (SQL_DIR / filename).read_text()
     for k, v in params.items():
         sql = sql.replace(f"{{{k}}}", str(v))
